@@ -1,0 +1,225 @@
+---
+title: "HWK3_KylePeterman"
+output: html_document
+date: "2023-06-27"
+---
+
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Loading Packages
+
+```{r}
+library(tidymodels)
+library(tidyverse)
+```
+
+
+## Loading in the data
+
+Load in the attrition data from an excel workbook.
+
+```{r Data loading}
+Data <- read_excel("~/Desktop/UGA IOMP/Advanced Analytics/UGA IOMP_AA_2023/HWK 3/WA_Fn-UseC_-HR-Employee-Attrition.xlsx")
+Data
+```
+
+## Explore the Data
+
+```{r }
+glimpse(Data)
+```
+
+
+```{r Creating ID variable}
+Data <- Data %>% 
+    mutate(ID = row_number()) %>%
+  select(ID, everything())
+```
+
+```{r Duplicates by row}
+sum(is.na(duplicated(Data)))
+```
+
+```{r Duplicates by column}
+which(duplicated(Data$ID))
+```
+
+```{r Checking for missing data}
+library(Amelia)
+missmap(Data)
+```
+
+```{r Character features}
+Data %>%
+  select_if(is.character) %>%
+  glimpse()
+```
+
+```{r Character features}
+Data %>%
+    select_if(is.character) %>%
+    map(unique)
+```
+
+```{r Numeric features}
+Data %>%
+  select_if(is.numeric) |> 
+  glimpse()
+```
+
+```{r}
+Data %>%
+    select_if(is.numeric) %>%
+    map(~ unique(.) %>% length())
+```
+
+It is important to note that the variables "Over 18", "Standard Hours", and "Employee Count" have zero variance and should not be included in a model.
+
+```{r}
+Data %>%
+        group_by(Attrition) %>%
+        tally() %>%
+        ggplot(aes(x = Attrition, y = n,fill=Attrition)) +
+        geom_bar(stat = "identity") +
+        theme_minimal() +
+        labs(x="Attrition", y="Count of Attrition") +
+        ggtitle("Attrition") +
+        geom_text(aes(label = n), vjust = -0.5, position = position_dodge(0.9))
+```
+
+This appears to be an unbalanced data set pertaining to attrition. This will need to be addressed later on using a resampling method to avoid a skewed prediciton. 
+
+##Preprocess the Data 
+
+There is no missing data so imputations will not need to happen. There are a few variables that should be turned into factors. These variables are as follows: Attrition and Business Travel, Attrition will need to be a factor since it will be the outcome variable for the Lasso regression computations later on.
+
+```{r Changing variables to factors}
+Data <- Data %>%
+  mutate(BusinessTravel = factor(BusinessTravel,
+                                 levels = c("Non-Travel",
+                                            "Travel_Rarely",
+                                            "Travel_Frequently"))) %>%
+  mutate(Attrition = as.factor(Attrition))
+
+glimpse(Data)
+```
+
+Both Attrition and Business Travel have been converted into factors. Now the data can be split. It is important to split your data before modeling. 
+
+##Train the Data
+
+```{r Splitting the data}
+library(janitor)
+set.seed(1234)
+Attrition_split <- initial_split(Data, strata = Attrition)
+Attrition_train <- training(Attrition_split)
+Attrition_test <- testing(Attrition_split)
+Attrition_folds <- vfold_cv(Attrition_train, v = 10) #split the training data into folds for cross validation later
+
+```
+
+```{r Create recipe}
+Attrition_rec <- recipe(Attrition ~ ., data = Attrition_train) |> 
+    update_role(ID, EmployeeNumber, new_role = "ID") |> #Assigning a new role to variables to remove influence on 
+        step_novel(all_nominal_predictors()) |>  #creates a specification of a recipe step that will assign a previously unseen factor level to a new value.
+    step_dummy(all_nominal_predictors()) |> #dummy coding all necessary variables 
+    step_zv(all_numeric(), -all_outcomes()) |> #removing items with zero variance
+    step_normalize(all_numeric(), -all_outcomes()) #normalizing values in order run logisitic lasso regression
+```
+
+```{r Create work flow}
+Attrition_spec <- logistic_reg(penalty = .1, mixture = 1) |> #mixture=1 is for lasso 
+    set_engine("glmnet") |> 
+    set_mode("classification")
+   
+
+wf <- workflow() |> 
+    add_recipe(Attrition_rec)
+
+Attrition_fit <- wf |> 
+    add_model(Attrition_spec) |> 
+    fit(data=Attrition_train)
+
+Attrition_fit |> 
+    pull_workflow_fit() |> 
+    tidy()
+```
+This model seems to be over fitting every variable. Each estimate is calculating at "0". There should probably be a resampling method to help find the best penalty value to use within the logistic regression model. 
+
+
+```{r Creating a tuning grid}
+set.seed(2020) #setting seed to normalize randomness for bootstrapping 
+Attrition_boot <- bootstraps(Attrition_train, strata = Attrition) #taking bootstraps resamples of training data. This step is superfulous since 10 fold cross validation set has been created.
+
+tune_spec <- logistic_reg(penalty = tune(), mixture = 1) |> #mixture set to "1" indicates a lasso regression
+    set_engine("glmnet") |> 
+    set_mode("classification")
+
+lambda_grid <- grid_regular(penalty(), levels = 50) 
+```
+
+```{r Tuning the grid}
+set.seed(2020)
+lasso_grid <- tune_grid(wf |> 
+                            add_model(tune_spec), resamples = Attrition_folds, grid = lambda_grid)
+```
+
+```{r Collecting the metrics}
+lasso_grid |> 
+    collect_metrics()
+```
+
+
+```{r Visualize the metrics}
+lasso_grid |> 
+    collect_metrics() |> 
+    ggplot(aes(penalty, mean, color= .metric)) +
+    geom_errorbar(aes(ymin=mean-std_err, ymax= mean+std_err), alpha= 0.5) +
+    geom_line(size = 2) +
+    facet_wrap(~.metric, scales = "free", nrow = 2) +
+    scale_x_log10() +
+    theme(legend.position = "none")
+```
+
+Lets use the ROC_AUC for the penalty measurement as we decide which penalty is the best for the model. 
+
+```{r Selcting best penalty parameter}
+lowest_ROC.AUC <- lasso_grid |> 
+    select_best("roc_auc", maxmize=FALSE)
+
+lowest_ROC.AUC
+
+final_lasso <- finalize_workflow(wf |> 
+                                     add_model(tune_spec), lowest_ROC.AUC) #using tuned model with the best ROC AUC
+
+```
+Looks like the most optimal penalty parameter for the model is .000869. Now lets visualize the final lasso workflow to see what variables contribute to the model most significantly.
+
+```{r Fit finalized workflow on training data}
+library(vip)
+
+final_lasso |> 
+    fit(Attrition_train) |> 
+    pull_workflow_fit() |> 
+    vi(lambda = lowest_ROC.AUC$penalty) |> 
+    mutate(Importance = abs(Importance), Variable = fct_reorder(Variable, Importance)) |> 
+    ggplot(aes(x= Importance, y= Variable, fill = Sign)) +
+    geom_col() +
+    scale_x_continuous(expand = c(0,0))+
+    labs(y = NULL)
+```
+
+The final step is to fit the model with the best selected tuning parameter to the testing data to see how it performs. 
+
+```{r Fitting final model on testing data}
+last_fit(final_lasso, Attrition_split) |> #fitting the final lasso model on the testing data
+    collect_metrics() #grabbing both accuracy and roc_auc metrics
+```
+
+This final estimate for the roc_auc seems to align with the 10 fold cross validation that was utilized to address the imbalanced nature of the data. Also, it seems to pass the "eye test" when looking at the estimates being visualized within the plot on line 187 of this file. Overall, the model seems perform fairly well. 
+
+
+

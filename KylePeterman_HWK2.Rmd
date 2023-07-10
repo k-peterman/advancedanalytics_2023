@@ -1,0 +1,138 @@
+---
+title: "Class 2 HW - Kyle Peterman"
+output: html_notebook
+---
+
+# 1
+
+Create a `parsnip` specification for a linear regression model.
+
+# HW code
+```{r}
+lm_spec <- linear_reg() %>%
+  set_mode("regression") %>% #mode tells R what type of analysis to run
+  set_engine("lm") #engine tells R what package or commands to use to run analysis
+```
+
+# 2
+
+Once we have the specification we can `fit` it by supplying a formula expression and the data we want to fit the model on.
+The formula is written on the form `y ~ x` where `y` is the name of the response and `x` is the name of the predictors.
+The names used in the formula should match the names of the variables in the data set passed to `data`. 
+
+Use `lm_spec` to fit the model of `medv` predicted by every predictor variable. Hint: you can use "." to specify every predictor.
+
+# HW code
+
+```{r}
+lm_fit <- lm_spec %>%
+  fit(medv ~ ., data = Boston) #"." indicates all other variables
+lm_fit
+```
+
+# 3
+
+Get a summary of your model using `pluck` and `summary`
+
+# HW code
+
+```{r}
+lm_fit %>% 
+  pluck("fit") %>%
+  summary()
+```
+
+# 4
+
+Take a look at `lm_fit` with `tidy`
+
+# HW Code
+
+```{r}
+tidy(lm_fit) #a clean way to look at statistics
+```
+
+# 5
+
+Extract the model statistics using `glance`
+
+#HW code
+```{r}
+glance(lm_fit) #glance extracts important model statistics
+```
+
+# 6
+
+Get the predicted `medv` values from your model using `predict`
+
+#HW code
+```{r predicting values }
+predict(lm_fit, new_data = Boston) #must explicitly indicate 'new data' for predict function
+```
+
+
+# 7
+
+Bind the predicted columns to your existing data
+
+#HW code
+
+```{r Adding .pred to existing data}
+bind_cols(
+  predict(lm_fit, new_data = Boston),
+  Boston
+) %>%
+  select(everything(), .pred)
+```
+
+# 8
+
+Now, make things easier by just using the `augment` function to do this.
+
+#HW code
+```{r}
+augment(lm_fit, new_data = Boston)
+```
+
+
+# 9
+
+Focus specifically on the median value and the `.pred`, then you can select those two columns
+
+#HW code
+```{r}
+augment(lm_fit, new_data = Boston) %>%
+  select(.pred, medv)
+```
+
+
+# 10
+
+Create a `recipe` with an interaction step between lstat and age
+
+#HW code
+```{r}
+rec_spec <- recipe(medv ~ ., data = Boston) %>%
+  step_interact(~ lstat:age) #this is the interaction between lstat and age
+```
+
+# 11
+
+Create a `workflow` and add your lm_spec model and your rec_spec recipe.
+
+#HW code
+```{r}
+lm_wf <- workflow() %>%
+  add_model(lm_spec) %>%
+  add_recipe(rec_spec)
+```
+
+# 12
+
+Fit your `workflow`.
+
+#HW code
+```{r}
+lm_wf %>% fit(Boston)
+```
+
