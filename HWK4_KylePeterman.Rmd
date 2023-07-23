@@ -1,0 +1,783 @@
+---
+title: "HWK4_KylePeterman"
+output: html_document
+date: "2023-07-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load packages
+
+```{r Libraries}
+pacman::p_load(openxlsx, 
+               tidyverse, 
+               devtools,
+               conflicted,
+               lubridate,
+               sentimentr)
+
+#Loading libraries
+library(openxlsx)
+library(tidyverse)
+library(devtools)
+library(conflicted)
+library(lubridate)
+library(sentimentr)
+
+
+devtools::install_github("mguideng/gdscrapeR")
+
+library(gdscrapeR)
+```
+
+```{r}
+conflict_prefer("filter", "dplyr")
+```
+
+##Load Data
+
+```{r}
+library(readr)
+Data <- read_csv("~/Desktop/UGA IOMP/Advanced Analytics/UGA IOMP_AA_2023/Class 4/glassdoortest1.csv")
+```
+
+```{r Get cloumn names}
+colnames(Data)
+```
+
+```{r Change "...1" to ID}
+Data <- Data |> 
+    rename(ID=...1)
+```
+
+```{r Check ID variable}
+colnames(Data)
+```
+
+##Create and process new data set
+
+```{r Create new data frame without title date for positive comments}
+P_Comments <- Data %>%
+    select(c(ID, pros)) %>%
+    filter(!is.na(pros)) %>% #removing missing data
+    rename('positive_comments' = 'pros') #renaming variables
+```
+
+```{r Create new data frame without title date for negative comments}
+N_Comments <- Data %>%
+    select(c(ID, cons)) %>%
+    filter(!is.na(cons)) %>% #removing missing data
+    rename('negative_comments' = 'cons') #renaming variables
+```
+
+
+```{r}
+P_Comments <- P_Comments |> 
+    as_tibble() |> 
+    mutate(positive_comments= str_replace_all(positive_comments, "\uFFFD", "")) 
+
+```
+
+```{r}
+N_Comments <- N_Comments |> 
+    as_tibble() |> 
+    mutate(negative_comments= str_replace_all(negative_comments, "\uFFFD", "")) 
+```
+
+
+```{r Removing lowercase}
+P_Comments <- P_Comments %>%
+    mutate(positive_comments = tolower(positive_comments))
+
+N_Comments <- N_Comments %>%
+    mutate(negative_comments = tolower(negative_comments))
+
+```
+
+```{r Removing all line breaks}
+P_Comments$positive_comments <- gsub("[\r\n]", "", P_Comments$positive_comments)
+N_Comments$negative_comments <- gsub("[\r\n]", "", N_Comments$negative_comments)
+
+P_Comments <- P_Comments %>%
+    select(ID, positive_comments) %>%
+    na.omit()
+
+N_Comments <- N_Comments %>%
+    select(ID, negative_comments) %>%
+    na.omit()
+```
+
+##Category creation
+
+Overall categories:
+1. Benefits
+2. Management
+3. Compensation
+4. Career Opportunity
+5. Safety
+6. Work Environment
+7. Culture
+8. Onboarding
+9. Interviews
+10. Collaboration
+11. Work Life Balance
+12. Organizaitonal Structure
+13. Travel
+
+Sub Categories:
+1. Benefits: Insurance
+2. Benefits: Paid Time Off
+3. Benefits: Retirement Plan
+4. Compensation: Bonuses
+5. Career Opportunity: Promotion
+6. Career Opportunity: Training/Learning
+7. Career Opportunity: Performance Management
+
+
+
+```{r}
+#Creating a beginning using `now` from lubridate.
+#This is helpful when you get to several categories using a brute force search so that you (and others if they run you script) know about how long it will take to run.
+
+#After we run everything, we will create `end_time <- now()` along with `print(difftime(end_time, start_time))` as the last line of code after everything we are concerned about has run.
+start_time <- now()
+```
+
+```{r Benefits Grouping}
+###Positive Comments###
+benefits <- c('\\brx\\b', #this will only get the word "rx" and nothing else
+              '^.*medic.*$', #this will get medic, medicine, medical, etc.
+              '(?=.*bene)(?=.*(?:health))', #This will get benefits, beneficial, benefit, etc. but only if it occurs with health, healthy, healthcare, in the same comment
+              '(?=.*coverage)(?=.*(?:medic|deduct|prescrip|insur|drug|health|dependent))', #This will get coverage, overages, etc. as long as some form of medic, deduct, prescription, etc. occur in the same comment
+                    '\\b(?:health\\W+(?:\\w+\\W+){0,1}?care)\\b', #this will only get health care or healthcare (e.g. health and care must occur within one word)
+                    '\\bhealthcare\\b', #this will only get the word "healthcare". If there is a space between them, it won't pick it up.
+              '\\bhealth\\s?care\\b', #this will get the word "healthcare" or "health care" as the \\s? indicates zero or one whitespace character.
+                    '\\b(?:medical\\W+(?:\\w+\\W+){0,3}?benefits|benefits\\W+(?:\\w+\\W+){0,3}?medical)\\b', #This will get medical benefits or benefits medical as long as they occur within 3 word of each other.
+              '^.*vacation.*$',
+              '\\bpto\\b'
+                     )
+
+benefits_pattern <- paste(benefits, collapse = "|") #This puts everything from what you put into `benefits` together into a pattern to search for.
+
+pos_benefits_comments <- as.data.frame(P_Comments[grep(benefits_pattern, P_Comments$positive_comments, value = FALSE, perl = TRUE),]) # This takes the pattern you just created and searches over the entire column of "comments" in the Comments_df
+
+pos_TEST <- P_Comments %>%
+    mutate(benefits = ifelse(positive_comments %in% pos_benefits_comments$positive_comments, "Y",
+                             "N")) #This creates a new object, pos_TEST, from Comments_df and if any of the comments in the "comments" column match (%in%) the comments exactly, they get a "Y". If not they get a "N" in the new "benefits" column
+
+###Negative Comments###
+
+benefits_pattern <- paste(benefits, collapse = "|") #This puts everything from what you put into `benefits` together into a pattern to search for.
+
+neg_benefits_comments <- as.data.frame(N_Comments[grep(benefits_pattern, N_Comments$negative_comments, value = FALSE, perl = TRUE),]) # This takes the pattern you just created and searches over the entire column of "comments" in the Comments_df
+
+neg_TEST <- N_Comments %>%
+    mutate(benefits = ifelse(negative_comments %in% neg_benefits_comments$negative_comments, "Y",
+                             "N")) #This creates a new object, neg_TEST, from Comments_df and if any of the comments in the "comments" column match (%in%) the comments exactly, they get a "Y". If not they get a "N" in the new "benefits" column
+```
+
+```{r Benefits Insurance grouping}
+insurance <- c('(?=.*bene)(?=.*(?:insurance))', 
+               '\\bdental\\b', #this will only get the word "dental" and nothing else
+               '\\vision\\b', #this will only get the word "vision" and nothing else
+               '\\bpremium\\b', #this will only get the word "premium" and nothing else
+               '(?=.*insur)(?=.*(?:medic|dental|life|vision|supplement|disabl))', #gets all lines to contain words beginning with insur and have medic, dental, vision, supplement, and disabl
+                        '\\b(?:insurance\\W+(?:\\w+\\W+){0,1}?premium)\\b', #gets insurance and premium if they are one word apart
+                        '\\binsurance\\b') #this will only get the word "insurance" and nothing else
+
+insurance_benefits_pattern <- paste(insurance, collapse = "|") 
+
+pos_insurance_comments <- as.data.frame(P_Comments[grep(insurance_benefits_pattern, P_Comments$positive_comments, value = FALSE, perl = TRUE),])
+
+pos_TEST <- pos_TEST %>%
+    mutate(insurance = ifelse(positive_comments %in% pos_insurance_comments$positive_comments, "Y",
+                             "N")) 
+###Negative Comments###
+
+insurance_benefits_pattern <- paste(insurance, collapse = "|") 
+
+neg_insurance_comments <- as.data.frame(N_Comments[grep(insurance_benefits_pattern, N_Comments$negative_comments, value = FALSE, perl = TRUE),]) 
+
+neg_TEST <- neg_TEST %>%
+    mutate(insurance = ifelse(negative_comments %in% neg_insurance_comments$negative_comments, "Y",
+                             "N")) 
+```
+
+```{r Benefits Paid Time Off}
+pto <- c('\\bvacation\\b', #gets the word vacation
+               '\\bpto\\b', #this will only get the word "pto" and nothing else
+         '\\b(?:paid\\W+(?:\\w+\\W+){0,1}?off)') #This will pick up paid and off as long as they are within 1 word of each other within the comment
+
+pto_benefits_pattern <- paste(pto, collapse = "|") #This puts everything from what you put into `pto` together into a pattern to search for.
+
+pos_pto_comments <- as.data.frame(P_Comments[grep(pto_benefits_pattern, P_Comments$positive_comments, value = FALSE, perl = TRUE),]) # This takes the pattern you just created and searches over the entire column of "comments" in the Comments_df
+
+pos_TEST <- pos_TEST %>%
+    mutate(pto = ifelse(positive_comments %in% pos_pto_comments$positive_comments, "Y",
+                             "N")) 
+
+###Negative Comments###
+
+pto_benefits_pattern <- paste(pto, collapse = "|") 
+
+neg_pto_comments <- as.data.frame(N_Comments[grep(pto_benefits_pattern, N_Comments$negative_comments, value = FALSE, perl = TRUE),]) 
+
+neg_TEST <- neg_TEST %>%
+    mutate(pto = ifelse(negative_comments %in% neg_pto_comments$negative_comments, "Y",
+                             "N")) 
+```
+
+
+```{r Benefits Retirement}
+retire <- c('\\b401k\\b', #gets 401k
+            '\\bpension\\b', #gets pension
+               '\\bretirement\\b', #this will only get the word "retirement" and nothing else
+         '\\b(?:401k\\W+(?:\\w+\\W+){0,1}?plan)',#picks up 401k and plan when they are within 1 word of each other
+         '(?=.*employ)(?=.*(?:contribution))', #picks up employer/employee when used with contribution
+         '\\b(?:401k\\W+(?:\\w+\\W+){0,2}?matching)' #picks up 401k and matching when within 2 words of each other
+         )
+
+retire_benefits_pattern <- paste(retire, collapse = "|") 
+
+pos_retire_comments <- as.data.frame(P_Comments[grep(retire_benefits_pattern, P_Comments$positive_comments, value = FALSE, perl = TRUE),]) 
+
+pos_TEST <- pos_TEST %>%
+    mutate(retire = ifelse(positive_comments %in% pos_retire_comments$positive_comments, "Y",
+                             "N")) 
+###Negative Comments###
+
+retire_benefits_pattern <- paste(retire, collapse = "|") 
+
+neg_retire_comments <- as.data.frame(N_Comments[grep(retire_benefits_pattern, N_Comments$negative_comments, value = FALSE, perl = TRUE),]) 
+
+neg_TEST <- neg_TEST %>%
+    mutate(retire = ifelse(negative_comments %in% neg_retire_comments$negative_comments, "Y",
+                             "N")) 
+```
+
+```{r Management}
+management <- c('\\bmanagement\\b', #gets "management"
+                '\\bmanagers\\b', #this will only get the word "managers" and nothing else
+              '\\bmanager\\b', #this will only get the word "manager" and nothing else
+              '\\bboss\\b', #This will get the word "boss"
+              '^.*lead.*$', #this will get lead, leader, leaders, leadership, etc
+              '^.*supervis.*$' #this will get supervise, supervisor, supervisors, etc.
+              )
+
+management_pattern <- paste(management, collapse = "|") 
+
+pos_management_comments <- as.data.frame(P_Comments[grep(management_pattern, P_Comments$positive_comments, value = FALSE, perl = TRUE),]) 
+
+pos_TEST <- pos_TEST %>%
+    mutate(management = ifelse(positive_comments %in% pos_management_comments$positive_comments, "Y",
+                             "N")) 
+
+###Negative Comments###
+
+management_pattern <- paste(management, collapse = "|") 
+
+neg_management_comments <- as.data.frame(N_Comments[grep(management_pattern, N_Comments$negative_comments, value = FALSE, perl = TRUE),]) 
+
+neg_TEST <- neg_TEST %>%
+    mutate(management = ifelse(negative_comments %in% neg_management_comments$negative_comments, "Y",
+                             "N")) 
+```
+
+
+```{r Compensation}
+compensation <- c('^.*compensat.*$', #this will pick up compensate,compensated, compensation, etc. 
+                '\\bpay\\b', #this will only get the word "pay" and nothing else
+              '\\bsalary\\b', #this will only get the word "salary" and nothing else
+               '\\b(?:pay\\W+(?:\\w+\\W+){0,1}?raise)\\b', #this will get pay and raise when they are within one word of each other
+              '\\bbonuses\\b', #this will get only the word "bonuses"
+              '\\bbonus\\b' #this will get only the word "bonus"
+              )
+
+compensation_pattern <- paste(compensation, collapse = "|") 
+
+pos_compensation_comments <- as.data.frame(P_Comments[grep(compensation_pattern, P_Comments$positive_comments, value = FALSE, perl = TRUE),]) 
+
+pos_TEST <- pos_TEST %>%
+    mutate(compensation = ifelse(positive_comments %in% pos_compensation_comments$positive_comments, "Y",
+                             "N")) 
+
+###Negative Comments###
+
+compensation_pattern <- paste(compensation, collapse = "|") 
+
+neg_compensation_comments <- as.data.frame(N_Comments[grep(compensation_pattern, N_Comments$negative_comments, value = FALSE, perl = TRUE),]) 
+
+neg_TEST <- neg_TEST %>%
+    mutate(compensation = ifelse(negative_comments %in% neg_compensation_comments$negative_comments, "Y",
+                             "N")) 
+```
+
+```{r Career Opportunity}
+career_opportunity <- c('^.*mento.*$', #this will pick up mentor,mentorship, etc. 
+                         '\\bpromotion\\b', #this will only get the word "promotion" and nothing else
+                  '(?=.*new)(?=.*(?:job|promotion|role|position))', #this will get all comments that contain "new" with job, promotion, role, position
+                  '\\b(?:career\\W+(?:\\w+\\W+){0,1}?advancement)\\b', #this will career when it appears within one word of advancement
+                  '(?=.*development)(?=.*(?:learning|training|career|employee|professional))', #this will pull all comments that contain the word development and learning, training, career, employee, profession
+                   '(?=.*opportunity)(?=.*(?:career|learning|training|development))', #this will get all comments with the word opportunity and career, learning, training, development
+                  '(?=.*opportunities)(?=.*(?:career|learning|training|development))', #this will get all comments with the word opportunities and career, learning, training, development
+                  '(?=.*grow)(?=.*(?:career|position|role|job))', #this will get call comments that contain grow and career, learning, training, and development
+                  '(?=.*growth)(?=.*(?:opportunity|position|role|job|professional))', #this will get all comments that contain growth with opportunity, position, role, job, profession
+                  '\\bconference\\b', #this will comments with the word "conference"
+                  '\\bconferences\\b' #this will comments with the word "conferences"
+              )
+
+career_opportunity_pattern <- paste(career_opportunity, collapse = "|") 
+
+pos_career_opportunity_comments <- as.data.frame(P_Comments[grep(career_opportunity_pattern, P_Comments$positive_comments, value = FALSE, perl = TRUE),]) 
+
+pos_TEST <- pos_TEST %>%
+    mutate(career_opportunity = ifelse(positive_comments %in% pos_career_opportunity_comments$positive_comments, "Y",
+                             "N")) 
+
+###Negative Comments###
+
+career_opportunity_pattern <- paste(career_opportunity, collapse = "|") 
+
+neg_career_opportunity_comments <- as.data.frame(N_Comments[grep(career_opportunity_pattern, N_Comments$negative_comments, value = FALSE, perl = TRUE),]) 
+
+neg_TEST <- neg_TEST %>%
+    mutate(career_opportunity = ifelse(negative_comments %in% neg_career_opportunity_comments$negative_comments, "Y",
+                             "N")) 
+```
+
+```{r Promotion}
+promotion <- c('\\bpromotion\\b', #this will only get the word "promotion" and nothing else
+               '\\bpromoted\\b', #this will get comments with the word "promoted"
+               '\\b(?:promotion\\W+(?:\\w+\\W+){0,1}?opportunity)\\b', #this will get any comment that contains "promotion" within one word of opportunity
+                  '(?=.*new)(?=.*(?:job|promotion|role|position))', #this will get all comments that contain "new" and job promotion, role, promotion, position
+               '(?=.*advancement)(?=.*(?:job|role|position))' #this will get all comments that contain "advancement" and job, role, position
+              )
+
+promotion_pattern <- paste(promotion, collapse = "|") 
+
+pos_promotion_comments <- as.data.frame(P_Comments[grep(promotion_pattern, P_Comments$positive_comments, value = FALSE, perl = TRUE),]) 
+
+pos_TEST <- pos_TEST %>%
+    mutate(promotion = ifelse(positive_comments %in% pos_promotion_comments$positive_comments, "Y",
+                             "N")) 
+
+###Negative Comments###
+
+promotion_pattern <- paste(promotion, collapse = "|") 
+
+neg_promotion_comments <- as.data.frame(N_Comments[grep(promotion_pattern, N_Comments$negative_comments, value = FALSE, perl = TRUE),]) 
+
+neg_TEST <- neg_TEST %>%
+    mutate(promotion = ifelse(negative_comments %in% neg_promotion_comments$negative_comments, "Y",
+                             "N"))
+```
+###This Section is not done###
+
+```{r Training & Learning}
+train_learn <- c('\\btraining\\b', #this will get comments that contain "training"
+    '\\blearning\\b', #this will get comments with "learning"
+               '(?=.*training)(?=.*(?:skill|knowledge|job|opportunity|program))', #this will get comments that have training and also skill, knowledge, job, opportunity, program
+               '(?=.*learning)(?=.*(?:skill|knowledge|job|opportunity|program))', #this will get comments that have learning and also skill, knowledge, job, opportunity, program
+      '\\bconference\\b', #this will get comments with "conference"
+                  '\\bconferences\\b' #this will get comments with "conferences"
+              )
+
+train_learn_pattern <- paste(train_learn, collapse = "|") 
+
+pos_train_learn_comments <- as.data.frame(P_Comments[grep(train_learn_pattern, P_Comments$positive_comments, value = FALSE, perl = TRUE),]) 
+
+pos_TEST <- pos_TEST %>%
+    mutate(train_learn = ifelse(positive_comments %in% pos_train_learn_comments$positive_comments, "Y",
+                             "N")) 
+
+###Negative Comments###
+
+train_learn_pattern <- paste(train_learn, collapse = "|") 
+
+neg_train_learn_comments <- as.data.frame(N_Comments[grep(train_learn_pattern, N_Comments$negative_comments, value = FALSE, perl = TRUE),]) 
+
+neg_TEST <- neg_TEST %>%
+    mutate(train_learn = ifelse(negative_comments %in% neg_train_learn_comments$negative_comments, "Y",
+                             "N")) 
+```
+
+```{r Performance Management}
+performance <- c('(?=.*performance)(?=.*(?:tracking|appraisal|review|reward))', #this will get comments with "performance" and also tracking, appraisal, review, reward
+                 '(?=.*review)(?=.*(?:annual|quarterly))', #this will get comments with "review" and also annual and quarterly
+                       '\\b(?:performance\\W+(?:\\w+\\W+){0,1}?management)\\b' #this will get comments that have management within one word of performance
+                 
+                 
+              )
+
+performance_pattern <- paste(performance, collapse = "|") 
+
+pos_performance_comments <- as.data.frame(P_Comments[grep(performance_pattern, P_Comments$positive_comments, value = FALSE, perl = TRUE),]) 
+
+pos_TEST <- pos_TEST %>%
+    mutate(performance = ifelse(positive_comments %in% pos_performance_comments$positive_comments, "Y",
+                             "N")) 
+
+###Negative Comments###
+
+performance_pattern <- paste(performance, collapse = "|") 
+
+neg_performance_comments <- as.data.frame(N_Comments[grep(performance_pattern, N_Comments$negative_comments, value = FALSE, perl = TRUE),]) 
+
+neg_TEST <- neg_TEST %>%
+    mutate(performance = ifelse(negative_comments %in% neg_performance_comments$negative_comments, "Y",
+                             "N")) 
+```
+
+```{r Safety}
+safety <- c('\\bwellbeing\\b', #this will get comments with "wellbeaing"
+            '\\binjury\\b', #this will get comments with "injury"
+            '(?=.*psych)(?=.*(?:saf))', #this gets comments that contain words beginning with "psych" and "saf" next to each other
+            '^.*saf.*$', #this gets all comments with words beginning with saf
+            '\\bosha\\b') #this gets comments with the term "osha"
+
+safety_pattern <- paste(safety, collapse = "|") 
+
+pos_safety_comments <- as.data.frame(P_Comments[grep(safety_pattern, P_Comments$positive_comments, value = FALSE, perl = TRUE),]) 
+
+pos_TEST <- pos_TEST %>%
+    mutate(safety = ifelse(positive_comments %in% pos_safety_comments$positive_comments, "Y",
+                             "N")) 
+
+###Negative Comments###
+
+safety_pattern <- paste(safety, collapse = "|") 
+
+neg_safety_comments <- as.data.frame(N_Comments[grep(safety_pattern, N_Comments$negative_comments, value = FALSE, perl = TRUE),]) 
+
+neg_TEST <- neg_TEST %>%
+    mutate(safety = ifelse(negative_comments %in% neg_safety_comments$negative_comments, "Y",
+                             "N")) 
+```
+
+
+```{r Work Environment}
+work_environment <- c('\\b(?:work\\W+(?:\\w+\\W+){0,1}?environment)\\b', #this gets comments with environment within 1 word of work
+                      '\\bcoworkers\\b', #this gets comments with "coworkers"
+                       '\\b(?:remote\\W+(?:\\w+\\W+){0,1}?work)\\b', #this get the phrase "remote work"
+                    '\\b(?:office\\W+(?:\\w+\\W+){0,1}?environment)\\b', #this gets the phrase "office environement"
+                      '(?=.*employee)(?=.*(?:friendship|relationship))', #this gets comments that contain employee and friendship, relationship
+                      '\\bmorale\\b', #this gets comments with "morale"
+                    '\\b(?:work\\W+(?:\\w+\\W+){0,1}?conditions)\\b') #this gets the phrase "work conditions"
+                    
+
+work_environment_pattern <- paste(work_environment, collapse = "|") 
+
+pos_work_environment_comments <- as.data.frame(P_Comments[grep(work_environment_pattern, P_Comments$positive_comments, value = FALSE, perl = TRUE),]) 
+
+pos_TEST <- pos_TEST %>%
+    mutate(work_environment = ifelse(positive_comments %in% pos_work_environment_comments$positive_comments, "Y",
+                             "N")) 
+
+###Negative Comments###
+
+work_environment_pattern <- paste(work_environment, collapse = "|") 
+
+neg_work_environment_comments <- as.data.frame(N_Comments[grep(work_environment_pattern, N_Comments$negative_comments, value = FALSE, perl = TRUE),]) 
+
+neg_TEST <- neg_TEST %>%
+    mutate(work_environment = ifelse(negative_comments %in% neg_work_environment_comments$negative_comments, "Y",
+                             "N")) 
+```
+
+```{r Culture}
+culture <- c('\\b(?:office\\W+(?:\\w+\\W+){0,1}?culture)\\b', #this gets the phrase "office culture"
+             '\\b(?:work\\W+(?:\\w+\\W+){0,1}?culture)\\b', #this gets the phrase "work culture"
+             '\\b(?:company\\W+(?:\\w+\\W+){0,1}?values)\\b', #this gets the phrase "company values"
+              '(?=.*values)(?=.*(?:leadership|behaviors))' #this gets comments with values and leadership, behaviors
+             )
+
+culture_pattern <- paste(culture, collapse = "|") 
+
+pos_culture_comments <- as.data.frame(P_Comments[grep(culture_pattern, P_Comments$positive_comments, value = FALSE, perl = TRUE),]) 
+
+pos_TEST <- pos_TEST %>%
+    mutate(culture = ifelse(positive_comments %in% pos_culture_comments$positive_comments, "Y",
+                             "N")) 
+
+###Negative Comments###
+
+culture_pattern <- paste(culture, collapse = "|") 
+
+neg_culture_comments <- as.data.frame(N_Comments[grep(culture_pattern, N_Comments$negative_comments, value = FALSE, perl = TRUE),]) 
+
+neg_TEST <- neg_TEST %>%
+    mutate(culture = ifelse(negative_comments %in% neg_culture_comments$negative_comments, "Y",
+                             "N")) 
+```
+
+```{r Onboarding}
+onboarding <- c('^.*onboar.*$', #this gets comments with words beginning with "onboar"
+                      '\\b(?:new\\W+(?:\\w+\\W+){0,2}?onboard)\\b', #this gets onboard when it occurs within 2 words of "new"
+                '\\b(?:new\\W+(?:\\w+\\W+){0,2}?hire)\\b', #this gets "hire" when it occurs within 2 words of "new"
+                '\\borientation\\b' #this gets the word "orientation"
+             )
+
+onboarding_pattern <- paste(onboarding, collapse = "|") 
+
+pos_onboarding_comments <- as.data.frame(P_Comments[grep(onboarding_pattern, P_Comments$positive_comments, value = FALSE, perl = TRUE),]) 
+
+pos_TEST <- pos_TEST %>%
+    mutate(onboarding = ifelse(positive_comments %in% pos_onboarding_comments$positive_comments, "Y",
+                             "N")) 
+
+###Negative Comments###
+
+onboarding_pattern <- paste(onboarding, collapse = "|") 
+
+neg_onboarding_comments <- as.data.frame(N_Comments[grep(onboarding_pattern, N_Comments$negative_comments, value = FALSE, perl = TRUE),]) 
+
+neg_TEST <- neg_TEST %>%
+    mutate(onboarding = ifelse(negative_comments %in% neg_onboarding_comments$negative_comments, "Y",
+                             "N")) 
+```
+
+```{r Interview}
+interview <- c('^.*intervie.*$', #this gets words that begin with "intervie"
+                 '\\b(?:exit\\W+(?:\\w+\\W+){0,1}?interview)\\b' #this gets the word "interview" when it occurs within one word of "exit"
+               
+                
+             )
+
+interview_pattern <- paste(interview, collapse = "|") 
+
+pos_interview_comments <- as.data.frame(P_Comments[grep(interview_pattern, P_Comments$positive_comments, value = FALSE, perl = TRUE),]) 
+
+pos_TEST <- pos_TEST %>%
+    mutate(interview = ifelse(positive_comments %in% pos_interview_comments$positive_comments, "Y",
+                             "N")) 
+
+###Negative Comments###
+
+interview_pattern <- paste(interview, collapse = "|") 
+
+neg_interview_comments <- as.data.frame(N_Comments[grep(interview_pattern, N_Comments$negative_comments, value = FALSE, perl = TRUE),]) 
+
+neg_TEST <- neg_TEST %>%
+    mutate(interview = ifelse(negative_comments %in% neg_interview_comments$negative_comments, "Y",
+                             "N")) 
+```
+
+```{r Collaboration}
+collaboration <- c('^.*collab.*$', #this gets words beginning with "collab"
+                   '\\bteamwork\\b', #this gets "teamwork"
+                   '\\b(?:department\\W+(?:\\w+\\W+){0,3}?collaboration)\\b', #this gets comments with "collaborationw within 3 words of department
+                   '\\b(?:team\\W+(?:\\w+\\W+){0,1}?work)\\b' #this gets the phrase "team work"
+             )
+
+collaboration_pattern <- paste(collaboration, collapse = "|") 
+
+pos_collaboration_comments <- as.data.frame(P_Comments[grep(collaboration_pattern, P_Comments$positive_comments, value = FALSE, perl = TRUE),]) 
+
+pos_TEST <- pos_TEST %>%
+    mutate(collaboration = ifelse(positive_comments %in% pos_collaboration_comments$positive_comments, "Y",
+                             "N")) 
+
+###Negative Comments###
+
+collaboration_pattern <- paste(collaboration, collapse = "|") 
+
+neg_collaboration_comments <- as.data.frame(N_Comments[grep(collaboration_pattern, N_Comments$negative_comments, value = FALSE, perl = TRUE),]) 
+
+neg_TEST <- neg_TEST %>%
+    mutate(collaboration = ifelse(negative_comments %in% neg_collaboration_comments$negative_comments, "Y",
+                             "N")) 
+```
+
+```{r Work Life Balance}
+balance <- c('^.*overtime.*$', #this gets the word "overtime"
+                   '\\b(?:work\\W+(?:\\w+\\W+){0,1}?balance)\\b', #this gets the phrase "work balance"
+                   '\\b(?:work\\W+(?:\\w+\\W+){0,1}?life)\\b', #this gets the phrase "work life"
+              '\\b(?:life\\W+(?:\\w+\\W+){0,1}?balance)\\b' #this gets phrase "life balance"
+             )
+
+balance_pattern <- paste(balance, collapse = "|") 
+
+pos_balance_comments <- as.data.frame(P_Comments[grep(balance_pattern, P_Comments$positive_comments, value = FALSE, perl = TRUE),]) 
+
+pos_TEST <- pos_TEST %>%
+    mutate(balance = ifelse(positive_comments %in% pos_balance_comments$positive_comments, "Y",
+                             "N")) 
+
+###Negative Comments###
+
+balance_pattern <- paste(balance, collapse = "|")
+
+neg_balance_comments <- as.data.frame(N_Comments[grep(balance_pattern, N_Comments$negative_comments, value = FALSE, perl = TRUE),]) 
+
+neg_TEST <- neg_TEST %>%
+    mutate(balance = ifelse(negative_comments %in% neg_balance_comments$negative_comments, "Y",
+                             "N")) 
+```
+
+```{r Oranization}
+organization <- c('(?=.*org)(?=.*(?:strategy|structure|planning|hierarchy|effectiveness|design|development|system|process))', #this gets comments with org and all any other words listed
+                  '\\b(?:organization\\W+(?:\\w+\\W+){0,2}?management)\\b', #this gets management within 2 words of organization
+                    '\\b(?:change\\W+(?:\\w+\\W+){0,1}?management)\\b' #this gets management within 1 word of "change"
+             )
+
+organization_pattern <- paste(organization, collapse = "|") 
+
+pos_organization_comments <- as.data.frame(P_Comments[grep(organization_pattern, P_Comments$positive_comments, value = FALSE, perl = TRUE),]) 
+
+pos_TEST <- pos_TEST %>%
+    mutate(organization = ifelse(positive_comments %in% pos_organization_comments$positive_comments, "Y",
+                             "N")) 
+
+###Negative Comments###
+
+organization_pattern <- paste(organization, collapse = "|") 
+
+neg_organization_comments <- as.data.frame(N_Comments[grep(organization_pattern, N_Comments$negative_comments, value = FALSE, perl = TRUE),]) 
+
+neg_TEST <- neg_TEST %>%
+    mutate(organization = ifelse(negative_comments %in% neg_organization_comments$negative_comments, "Y",
+                             "N")) 
+```
+
+```{r Travel}
+travel <- c('(?=.*travel)(?=.*(?:housing|stipend|lodging|hotel|rental|air|expense))' #this gets comments with travel and the words listed above
+             )
+
+travel_pattern <- paste(travel, collapse = "|") 
+
+pos_travel_comments <- as.data.frame(P_Comments[grep(travel_pattern, P_Comments$positive_comments, value = FALSE, perl = TRUE),]) 
+
+pos_TEST <- pos_TEST %>%
+    mutate(travel = ifelse(positive_comments %in% pos_travel_comments$positive_comments, "Y",
+                             "N")) 
+
+###Negative Comments###
+
+travel_pattern <- paste(travel, collapse = "|") 
+
+neg_travel_comments <- as.data.frame(N_Comments[grep(travel_pattern, N_Comments$negative_comments, value = FALSE, perl = TRUE),]) 
+
+neg_TEST <- neg_TEST %>%
+    mutate(travel = ifelse(negative_comments %in% neg_travel_comments$negative_comments, "Y",
+                             "N")) 
+```
+
+```{r Bonus}
+bonus <- c('\\bbonuses\\b', #gets the word "bonuses
+           '(?=.*bonus)(?=.*(?:christmas|quarterly|signing|structure))', #gets comments with bonus and christmas, quarterly, signing, structure
+           '^.*incentiv.*$' #gets words that begin with "incentiv"
+           
+             )
+
+bonus_pattern <- paste(bonus, collapse = "|")
+
+pos_bonus_comments <- as.data.frame(P_Comments[grep(bonus_pattern, P_Comments$positive_comments, value = FALSE, perl = TRUE),]) 
+
+pos_TEST <- pos_TEST %>%
+    mutate(bonus = ifelse(positive_comments %in% pos_bonus_comments$positive_comments, "Y",
+                             "N")) 
+
+###Negative Comments###
+
+bonus_pattern <- paste(bonus, collapse = "|") 
+
+neg_bonus_comments <- as.data.frame(N_Comments[grep(bonus_pattern, N_Comments$negative_comments, value = FALSE, perl = TRUE),]) 
+
+neg_TEST <- neg_TEST %>%
+    mutate(bonus = ifelse(negative_comments %in% neg_bonus_comments$negative_comments, "Y",
+                             "N")) 
+```
+
+
+```{r}
+##################################
+# Positive Comment Report
+##################################
+
+#Creating df for header
+
+INTRO <- c("Peterman Incorporated",
+
+         "Data Source: Glassdoor",
+
+         "Data As Of: Q3 2020",
+
+         "Prepared on: 7/20/2023",
+
+         "Prepared by: Kyle Peterman")
+
+wb <- openxlsx::createWorkbook() #Create a work book
+
+
+#Positive Comment Report
+
+addWorksheet(wb, "Positive Comment Report") #name the worksheet in Excel
+
+writeData(wb, "Positive Comment Report", INTRO) #Write your INTRO
+
+
+#Create style
+
+style1 <- createStyle(fontColour = "#038DA2", textDecoration = "Bold") #Choose your custom font color (https://www.rgbtohex.net/) and make it bold. Call it style1
+
+ 
+
+addStyle(wb, style = style1, rows= 1:5, cols = 1, sheet = "Positive Comment Report") #add this style to your worksheet. Tell it which rows and columns
+
+writeData(wb, "Positive Comment Report", pos_TEST, startRow = 8) #put your DF (in this case pos_TEST) into the sheet under your writing (row 8)
+
+hs1 <- createStyle(textDecoration = "Bold") #create a new style for heading
+
+addStyle(wb, style = hs1, rows = 8, cols = 1:50, sheet = "Positive Comment Report") #Tell it where to go. We'll do 50 columns in this case so it can grow if needed
+
+#Freeze Panes
+
+#Also check here: https://stackoverflow.com/questions/37677326/applying-style-to-all-sheets-of-a-workbook-using-openxlsx-package-in-r
+
+freezePane(wb, "Positive Comment Report", firstActiveRow = 9) #Freeze those panes. You know you want to. Tell it where to start.
+
+#Add filter
+
+addFilter(wb, "Positive Comment Report", row = 8, cols = 1:50) #Add your filter as well. If you're trying to impress, you might as well go all in :)
+
+#Now we'll do a fancy save by customizing the file name using paste0 and system time. We'll also assume this was for the previous month. You'll also need to make this path the one you want on your computer. 
+
+#Negative Comment Report
+
+addWorksheet(wb, "Negative Comment Report") #name the worksheet in Excel
+
+writeData(wb, "Negative Comment Report", INTRO) #Write your INTRO
+
+
+#Create style
+
+style1 <- createStyle(fontColour = "#038DA2", textDecoration = "Bold") #Choose your custom font color (https://www.rgbtohex.net/) and make it bold. Call it style1
+
+ 
+
+addStyle(wb, style = style1, rows= 1:5, cols = 1, sheet = "Negative Comment Report") #add this style to your worksheet. Tell it which rows and columns
+
+writeData(wb, "Negative Comment Report", neg_TEST, startRow = 8) #put your DF (in this case neg_TEST) into the sheet under your writing (row 8)
+
+hs1 <- createStyle(textDecoration = "Bold") #create a new style for heading
+
+addStyle(wb, style = hs1, rows = 8, cols = 1:50, sheet = "Negative Comment Report") #Tell it where to go. We'll do 50 columns in this case so it can grow if needed
+
+#Freeze Panes
+
+#Also check here: https://stackoverflow.com/questions/37677326/applying-style-to-all-sheets-of-a-workbook-using-openxlsx-package-in-r
+
+freezePane(wb, "Negative Comment Report", firstActiveRow = 9) #Freeze those panes. You know you want to. Tell it where to start.
+
+#Add filter
+
+addFilter(wb, "Negative Comment Report", row = 8, cols = 1:50) #Add your filter as well. If you're trying to impress, you might as well go all in :)
+
+#Now we'll do a fancy save by customizing the file name using paste0 and system time. We'll also assume this was for the previous month. You'll also need to make this path the one you want on your computer. 
+
+saveWorkbook(wb, paste0("~/Desktop/UGA IOMP/Advanced Analytics/UGA IOMP_AA_2023/HWK 4/Comment_Report_", format(floor_date(Sys.Date()-months(1), "month"), "%B_%Y") , ".xlsx"), overwrite = TRUE)
+```
+
+
